@@ -88,6 +88,22 @@ DBdiagram link: https://dbdiagram.io/d/testtask-6aa09a9a28e65f9ec2553d76
 
 Endi, bizda idempotency masalasi bor. Uni qanday model qilganimiz afzalroq, degan savol. 
 
+#### Idempotency
+
+O'zi idempotent nima degani? Bir operatsiyani qayta bajarsa ham side effekt bo'lmay, bir xil natija qaytishi. HTTP da POST va PATCH dan boshqa methodlar hammasi idempotent. Faqat POST va PATCH qayta yuborilsa boshqa side effectlarga sabab bo'lishi mumkin (2 marta order create/cancel bo'lishi, e.g.). Idempotency key bilan har bir requestga unique ID beramiz va o'sha ID orqali yagonalikni ta'minlaymiz. Bizning holatda, har bir order faqat 1 marta create bo'lishini ensure qilishimiz kerak. Bizda 2 ta asosiy tanlov bor:
+1. Orders jadvaliga `idempotency_key` field va `(user_id, idempotency_key)` unique constraint qo'shish. Qachonki bizda faqat 1 ta operatsiya turi (order) bo'lsa, mavjud jadval va unique constraintga suyansak bo'ladi.
+2. Yangi `idempotency_keys(key, user_id, request_hash, response_body, status, created_at)` jadvalini qo'shish. Qachonki bizda bir necha xil operatsiya turlari (order, payment, ...) mavjud bo'lsa, va necha marta bir xil key bilan request kelsa ham bir xil response qaytarish kerak bo'lsa, alohida jadval qilish ma'qulroq. Ayniqsa `response_body` field bizga successful responseni re-process qilmay tezroq olib keladi.
+
+Bizni holatimizda 1-usul qulayroq: bizda faqat orders va bizga sodda bo'lishi muhim. 
+
+> [!NOTE]
+> Taskdan xulosa qilish mumkinki, bizga 1 ta database 1 ta backend bo'lgan simple scenarioni handle qilishimiz yetarli. Lekin distributed tizimlarda boshqa yechimlar bor:
+> 1. Read-Write Replicalarga ajratilgan DBda read replicalar masterga kiritilgan o'zgarishlarni olishi sekin bo'ladi. Shu sabab, agar idempotencyni masterga kiritib, lekin uni borligini read replicadan so'rasak, duplicate entry kiritiladi. Shu sabab, idempotency keylar doim write replica bilan ishlashi kerak, read uchun ham write uchun ham.
+> 2. Sharding qilingan DBda agar bir user ma'lumotlari bir nechta shard bo'ylab tarqalib ketgan bo'lsa, u holda bitta atomic tranzaksiya qilib bo'lmaydi. Shu sabab sharding user_id orqali amalga oshiramiz va userga birikkan idempotency_keylar ham o'sha shardga joylashadi.
+> 3. Aytaylik, 2 ta bir xil request shunday ketma-ket kelib qoldi: 1-si hali jarayonda, tranzaksiya commit bo'lmagan, 2-si idempotency_keyni ko'rmay u ham processingni boshlab yubordi. Ha, oxir oqibat unique constraint faqat bittasiga ruxsat beradi baribir, lekin shu nuqtada Redisga lock qo'ysak, 2-tranzaksiya process qilib o'tirmay tushunadiki shu ishni qilayotgan boshqasi bor.
+
+(1) usulni qo'llab, `orders` jadvaliga `idempotency_key` fieldini qo'shaman.
+
 ### S3: Transaction Boundaries
 
 

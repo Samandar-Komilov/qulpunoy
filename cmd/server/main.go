@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Samandar-Komilov/qulpunoy/internal/config"
 	"github.com/go-chi/chi/v5"
@@ -22,8 +24,13 @@ func main() {
 	logger := config.InitLogger()
 	slog.SetDefault(logger)
 
-	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	if err := config.Migrate(rootCtx, cfg.DSN()); err != nil {
+		slog.Error("Failed to apply database migrations", "error", err)
+		os.Exit(1)
+	}
 
 	pool, err := config.NewPostgresPool(rootCtx, cfg.DSN())
 	if err != nil {
@@ -31,7 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
-	slog.Info("Database pool initialized", "dsn", cfg.DSN())
+	slog.Info("Database pool initialized")
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -40,5 +47,24 @@ func main() {
 		w.Write([]byte("Hello World!"))
 	})
 
-	http.ListenAndServe(":8008", r)
+	server := &http.Server{
+		Addr:    ":" + cfg.ServerPort,
+		Handler: r,
+	}
+
+	go func() {
+		slog.Info("Server starting", "port", cfg.ServerPort)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("Failed to start server", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-rootCtx.Done()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		slog.Error("Server forced shutdown", "error", err)
+	}
 }
