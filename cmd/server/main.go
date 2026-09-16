@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"github.com/Samandar-Komilov/qulpunoy/internal/config"
+	"github.com/Samandar-Komilov/qulpunoy/internal/repositories"
+	"github.com/Samandar-Komilov/qulpunoy/internal/routers"
+	"github.com/Samandar-Komilov/qulpunoy/internal/services"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -40,12 +43,17 @@ func main() {
 	defer pool.Close()
 	slog.Info("Database pool initialized")
 
+	userRepo := repositories.NewUserRepository(pool)
+	userService := services.NewUserService(userRepo)
+	userHandler := routers.NewUserHandler(userService)
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Hello World!"))
 	})
+	r.Post("/register", userHandler.Register)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.ServerPort,
