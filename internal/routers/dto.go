@@ -10,7 +10,7 @@ type userRegisterRequest struct {
 type userRegisterResponse struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
-	JoinedAt string `json:"joinedAt"`
+	JoinedAt string `json:"joined_at"`
 }
 
 type tokenRequest struct {
@@ -34,13 +34,33 @@ type refreshResponse struct {
 type productCreateRequest struct {
 	Name          string          `json:"name"`
 	Price         decimal.Decimal `json:"price"`
-	StockQuantity int             `json:"stockQuantity"`
+	StockQuantity int             `json:"stock_quantity"`
 }
 
 type productResponse struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	Price         string `json:"price"`
-	StockQuantity int    `json:"stockQuantity"`
-	CreatedAt     string `json:"createdAt"`
+	StockQuantity int    `json:"stock_quantity"`
+	CreatedAt     string `json:"created_at"`
+}
+
+type orderResponse struct {
+	ID          string `json:"id"`
+	UserID      string `json:"user_id"`
+	Status      string `json:"status"`
+	TotalAmount string `json:"total_amount"`
+	CreatedAt   string `json:"created_at"`
+}
+type orderItemResponse struct {
+	ID            string `json:"id"`
+	ProductID     string `json:"product_id"`
+	ProductName   string `json:"product_name"`
+	ProductPrice  string `json:"product_price"`
+	Quantity      int    `json:"quantity"`
+	PriceSnapshot string `json:"price_snapshot"`
+}
+type orderDetailResponse struct {
+	orderResponse
+	Items []orderItemResponse `json:"items"`
 }

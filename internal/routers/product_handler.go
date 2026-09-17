@@ -32,11 +32,11 @@ func (h *ProductHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, models.ErrEmptyProductName):
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
 		case errors.Is(err, models.ErrInvalidPrice):
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
 		case errors.Is(err, models.ErrInvalidStock):
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
 		default:
 			slog.Error("Failed to create product", "error", err)
 			writeError(w, http.StatusInternalServerError, "Internal server error")

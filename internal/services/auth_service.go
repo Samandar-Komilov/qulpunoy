@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Samandar-Komilov/qulpunoy/internal/auth"
 	"github.com/Samandar-Komilov/qulpunoy/internal/models"
@@ -29,6 +30,7 @@ func NewAuthService(repo *repositories.UserRepository, jwt auth.JWTManager) Auth
 }
 
 func (s *authService) Login(ctx context.Context, username, password string) (access, refresh string, err error) {
+	username = strings.TrimSpace(username)
 	if len(username) < 5 || len(password) < 8 {
 		return "", "", models.ErrInvalidInput
 	}

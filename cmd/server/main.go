@@ -48,14 +48,17 @@ func main() {
 
 	userRepo := repositories.NewUserRepository(pool)
 	productRepo := repositories.NewProductRepository(pool)
+	orderRepo := repositories.NewOrderRepository(pool)
 
 	userService := services.NewUserService(userRepo)
 	authService := services.NewAuthService(userRepo, jwtManager)
 	productService := services.NewProductService(productRepo)
+	orderService := services.NewOrderService(orderRepo)
 
 	userHandler := routers.NewUserHandler(userService)
 	authHandler := routers.NewAuthHandler(authService)
 	productHandler := routers.NewProductHandler(productService)
+	orderHandler := routers.NewOrderHandler(orderService)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -64,6 +67,8 @@ func main() {
 	r.Post("/register", userHandler.Register)
 	r.Post("/token", authHandler.Token)
 	r.Post("/refresh", authHandler.Refresh)
+	r.Get("/orders", orderHandler.List)
+	r.Get("/orders/{id}", orderHandler.Get)
 
 	// Protected APIs
 	r.Group(func(pr chi.Router) {

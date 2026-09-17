@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Samandar-Komilov/qulpunoy/internal/models"
 	"github.com/Samandar-Komilov/qulpunoy/internal/repositories"
@@ -21,6 +22,7 @@ func NewUserService(repo *repositories.UserRepository) *UserService {
 }
 
 func (s *UserService) Register(ctx context.Context, username, password string) (*models.User, error) {
+	username = strings.TrimSpace(username)
 	if len(username) < 5 || len(password) < 8 {
 		return nil, models.ErrInvalidInput
 	}

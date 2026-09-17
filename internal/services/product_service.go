@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"strings"
 
 	"github.com/Samandar-Komilov/qulpunoy/internal/models"
 	"github.com/Samandar-Komilov/qulpunoy/internal/repositories"
@@ -24,13 +25,14 @@ func NewProductService(repo *repositories.ProductRepository) *productService {
 }
 
 func (s *productService) Create(ctx context.Context, name string, price decimal.Decimal, stock int) (*models.Product, error) {
-	if len(name) <= 0 {
+	name = strings.TrimSpace(name)
+	if name == "" {
 		return nil, models.ErrEmptyProductName
 	}
 	if stock < 0 {
 		return nil, models.ErrInvalidStock
 	}
-	if price.LessThan(decimal.Zero) {
+	if price.LessThanOrEqual(decimal.Zero) {
 		return nil, models.ErrInvalidPrice
 	}
 
