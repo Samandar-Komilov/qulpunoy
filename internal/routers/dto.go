@@ -1,5 +1,7 @@
 package routers
 
+import "github.com/shopspring/decimal"
+
 type userRegisterRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -27,4 +29,18 @@ type refreshRequest struct {
 
 type refreshResponse struct {
 	AccessToken string `json:"access_token"`
+}
+
+type productCreateRequest struct {
+	Name          string          `json:"name"`
+	Price         decimal.Decimal `json:"price"`
+	StockQuantity int             `json:"stockQuantity"`
+}
+
+type productResponse struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Price         string `json:"price"`
+	StockQuantity int    `json:"stockQuantity"`
+	CreatedAt     string `json:"createdAt"`
 }

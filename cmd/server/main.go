@@ -47,12 +47,15 @@ func main() {
 	jwtManager := auth.NewManager(cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
 
 	userRepo := repositories.NewUserRepository(pool)
+	productRepo := repositories.NewProductRepository(pool)
 
 	userService := services.NewUserService(userRepo)
 	authService := services.NewAuthService(userRepo, jwtManager)
+	productService := services.NewProductService(productRepo)
 
 	userHandler := routers.NewUserHandler(userService)
 	authHandler := routers.NewAuthHandler(authService)
+	productHandler := routers.NewProductHandler(productService)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -65,6 +68,7 @@ func main() {
 	// Protected APIs
 	r.Group(func(pr chi.Router) {
 		pr.Use(auth.Authenticator(jwtManager))
+		pr.Post("/products", productHandler.Create)
 	})
 
 	server := &http.Server{
