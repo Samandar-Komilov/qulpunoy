@@ -3,13 +3,11 @@ package models
 import "errors"
 
 var (
-	ErrInvalidUsername = errors.New("Username must be at least 3 characters")
-	ErrInvalidPassword = errors.New("Password must be at least 6 characters")
-	ErrUserNotFound    = errors.New("User not found")
-	ErrUsernameTaken   = errors.New("Username is already taken")
-	ErrInvalidInput    = errors.New("Invalid username or password")
-	ErrUnauthorized    = errors.New("Unauthorized")
-	ErrForbidden       = errors.New("Forbidden")
+	ErrUserNotFound  = errors.New("User not found")
+	ErrUsernameTaken = errors.New("Username is already taken")
+	ErrInvalidInput  = errors.New("Invalid username or password")
+	ErrUnauthorized  = errors.New("Unauthorized")
+	ErrForbidden     = errors.New("Forbidden")
 
 	ErrProductNotFound   = errors.New("Product not found")
 	ErrInsufficientStock = errors.New("Insufficient stock for product")

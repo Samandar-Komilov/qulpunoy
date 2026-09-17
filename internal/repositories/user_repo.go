@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Samandar-Komilov/qulpunoy/internal/models"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -36,4 +37,22 @@ func (r *UserRepository) Create(ctx context.Context, u *models.User) error {
 	}
 
 	return nil
+}
+
+func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*models.User, error) {
+	u := &models.User{}
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, username, password, is_active, joined_at
+		FROM users
+		WHERE username = $1
+	`, username).Scan(&u.ID, &u.Username, &u.Password, &u.IsActive, &u.JoinedAt)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, models.ErrUserNotFound
+		}
+		return nil, fmt.Errorf("Failed to get user by username: %w", err)
+	}
+
+	return u, nil
 }

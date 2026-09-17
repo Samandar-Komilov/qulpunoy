@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Samandar-Komilov/qulpunoy/internal/auth"
 	"github.com/Samandar-Komilov/qulpunoy/internal/config"
 	"github.com/Samandar-Komilov/qulpunoy/internal/repositories"
 	"github.com/Samandar-Komilov/qulpunoy/internal/routers"
@@ -43,17 +44,28 @@ func main() {
 	defer pool.Close()
 	slog.Info("Database pool initialized")
 
+	jwtManager := auth.NewManager(cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
+
 	userRepo := repositories.NewUserRepository(pool)
+
 	userService := services.NewUserService(userRepo)
+	authService := services.NewAuthService(userRepo, jwtManager)
+
 	userHandler := routers.NewUserHandler(userService)
+	authHandler := routers.NewAuthHandler(authService)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Hello World!"))
-	})
+	// Public APIs
 	r.Post("/register", userHandler.Register)
+	r.Post("/token", authHandler.Token)
+	r.Post("/refresh", authHandler.Refresh)
+
+	// Protected APIs
+	r.Group(func(pr chi.Router) {
+		pr.Use(auth.Authenticator(jwtManager))
+	})
 
 	server := &http.Server{
 		Addr:    ":" + cfg.ServerPort,
