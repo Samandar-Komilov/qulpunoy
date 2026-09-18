@@ -74,6 +74,8 @@ func main() {
 	r.Group(func(pr chi.Router) {
 		pr.Use(auth.Authenticator(jwtManager))
 		pr.Post("/products", productHandler.Create)
+		pr.Post("/orders", orderHandler.Create)
+		pr.Post("/orders/{id}/cancel", orderHandler.Cancel)
 	})
 
 	server := &http.Server{

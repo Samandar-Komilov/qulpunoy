@@ -7,6 +7,12 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+const (
+	OrderStatusPending   = "pending"
+	OrderStatusConfirmed = "confirmed"
+	OrderStatusCancelled = "cancelled"
+)
+
 type Order struct {
 	ID          uuid.UUID
 	UserID      uuid.UUID
@@ -25,4 +31,14 @@ type OrderItem struct {
 	Quantity      int
 	PriceSnapshot decimal.Decimal
 	CreatedAt     time.Time
+}
+
+type OrderItemInput struct {
+	ProductID uuid.UUID
+	Quantity  int
+}
+
+type OrderItemLockSelected struct {
+	Price decimal.Decimal
+	Stock int
 }

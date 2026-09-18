@@ -64,3 +64,12 @@ type orderDetailResponse struct {
 	orderResponse
 	Items []orderItemResponse `json:"items"`
 }
+
+type orderItemRequest struct {
+	ProductID string `json:"product_id"`
+	Quantity  int    `json:"quantity"`
+}
+
+type orderCreateRequest struct {
+	Items []orderItemRequest `json:"items"`
+}

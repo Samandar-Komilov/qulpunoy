@@ -17,6 +17,7 @@ var (
 
 	ErrOrderNotFound            = errors.New("Order not found")
 	ErrDuplicateOrder           = errors.New("Order with this idempotency key already exists")
+	ErrDuplicateOrderItem       = errors.New("Order item with product ID already exists")
 	ErrInvalidOrderStatus       = errors.New("Invalid order status transition")
 	ErrInvalidOrderItemQuantity = errors.New("Order item quantity must be >0")
 	ErrMissingProductID         = errors.New("Order item must have a product ID")
