@@ -180,38 +180,53 @@ Ajoyib, lekin bir muammo bor. Tranzaksiyalar istagan ketma-ketlikda lock qilishn
 
 Buni oldini olish uchun user tanlagan product ID larni sort qilish yetarli. Shunda circular dependency bo'lmasligi kafolatlanadi.
 
-Natijada, qolgan querylarimiz quyidagicha ko'rinish oladi:
+##### Order Create
+
+Zakaz yaratishda eng avval idempotentlikni tekshirishni ma'qul ko'rdim. Bir xil idempotency_key bilan kelgan 2-chi request order yarata olmaydi, `ON CONFLICT DO NOTHING` yordamida skip, unique violationga tekshirish ham shart emas hech nima qaytmasa demak conflict. Bor orderni fetch qilib 200 qaytarib yuboraman. Avval product IDlar, stock quantitylar va boshqalarni tekshirib, keyin idempotencyga o'tib ham ko'rdim lekin unda idempotency fail bo'lsa hamma stock decrementlarni rollback qilishga to'g'ri keldi, ham keyin o'ylab logicheski ham birinchi idempotency tekshirish kerak degan qarorga keldim (aslida 1-idempotency tekshirsam bekorga order create boladi deb shundan qochish uchun boshqa yol izlab korgandim, oxiri ON CONFLICT DO NOTHINGda to'xtadim).
+
+Boshqa tomondan, UNIQUE faqat idempotency_keyga emas, balki `(user_id), idempotency_key` pairiga, sababi agar faqat keyni o'ziga qilsam boshqa user oldin yaratgan orderni datasini menga 200 qilib qaytarib qo'yadi.
+
 
 6. `POST /orders`
     ```
     BEGIN
+        order_id = uuid.New()
+        INSERT INTO orders (id, user_id, status, total_amount, idempotency_key)
+        VALUES (order_id, current_user.id, 'pending', 0, key)
+        ON CONFLICT (user_id, idempotency_key) DO NOTHING
+        RETURNING id
+
+        if no rows:
+            ROLLBACK -- duplicate key
+            return existing
+
         product_ids = SORT_ASC(items.product_ids)
 
-        SELECT id, stock_quantity FROM products 
-        WHERE id IN (product_ids) 
-        ORDER BY id ASC 
-        FOR UPDATE
+        SELECT id, price, stock_quantity FROM products
+        WHERE id = ANY(product_ids) ORDER BY id ASC FOR UPDATE
 
-        FOR EACH item IN order (sorted ASC):
-            IF NOT FOUND in result: ROLLBACK (404)
-            IF stock_quantity < item.quantity: ROLLBACK (409)
+        FOR EACH item:
+            IF not found:      ROLLBACK (404)
+            IF stock < qty:    ROLLBACK (409)
+            total += price * qty
 
-            UPDATE products 
-            SET stock_quantity = stock_quantity - item.quantity 
-            WHERE id = item.product_id
+        FOR EACH item:
+            INSERT INTO order_items (id, order_id, product_id, quantity, price_snapshot)
+            UPDATE products SET stock_quantity = stock_quantity - qty WHERE id = ...
 
-        INSERT INTO orders (user_id, idempotency_key, status) VALUES ($1, $2, 'pending')
-            ON UNIQUE VIOLATION: return existing order (200)
-
-        INSERT INTO order_items (order_id, product_id, quantity, price_at_purchase) 
-        VALUES (...)
+        UPDATE orders SET total_amount = total WHERE id = order_id
     COMMIT
     ```
     - ROLLBACK triggers: insufficient stock, product not found, DB error
     - LOCK held: order items' product IDs, sorted in ascending
     - GUARANTEE: parallel requests do not interfere with each other's stock updates, overselling and deadlocks are avoided
 
-Bu yerda avval product ID larni va ularning stocklarini tekshirib olyapmiz. Aslida avval `INSERT INTO orders ...` qilib idempotencyga urg'u bersak bo'lardi, UNIQUE constraintga suyanib. Lekin u holda, masalan stock insufficient bo'lsa 40 ta request order create qilib keyin rollback qiladi. Prosta waste.
+##### Order Cancel
+
+Zakazni otmen qilish ham user-scoped, u ham zakazni LOCK qiladi. Lekin nimaga, o'zi faqat o'sha orderni owneri unga access qiloladi, nima kerak lock? 2 ta sabab bilan:
+- Background job ham access qiladi. User va job bir vaqtda access qilishiga qo'ymaydi.
+- Userni o'zi network retry sabab 2 marta cancel qilib yuborsa, status check va lock idempotency saqlaydi.
+O'zi e'tibor bersak cancel idempotent operatsiya, bitta cancel bo'lgan narsani yana cancel qilib qandaydir yangi narsa yaratib bo'lmaydi. Canceledmi canceled tamom. Shu uchun idempotency key ham kerak emas bu yerga.
 
 7. `POST /orders/{id}/cancel`
     ```
@@ -235,6 +250,8 @@ Bu yerda avval product ID larni va ularning stocklarini tekshirib olyapmiz. Asli
     - ROLLBACK triggers: order not found, order not in 'pending' state
     - LOCK held: that specific order row
     - GUARANTEE: even if user and background job both attempt to cancel simultaneously, the stock is returned only once
+
+##### Background Job: run every minute, cancel orders 'pending' and >15 minute
 
 8. Background Job query
     ```

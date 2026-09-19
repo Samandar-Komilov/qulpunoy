@@ -10,7 +10,6 @@ import (
 	"github.com/Samandar-Komilov/qulpunoy/internal/models"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 )
@@ -102,6 +101,30 @@ func (r *OrderRepository) Create(ctx context.Context, userID uuid.UUID, idempote
 	}
 	defer tx.Rollback(ctx)
 
+	orderDefaultStatus := models.OrderStatusPending
+	var oid string
+	const q_insert_order = `
+		INSERT INTO orders (id, user_id, status, total_amount, idempotency_key)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (user_id, idempotency_key) DO NOTHING
+		RETURNING id
+	`
+	err = tx.QueryRow(
+		ctx, q_insert_order, uuid.New(), userID, orderDefaultStatus, decimal.Zero, idempotency_key,
+	).Scan(&oid)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			tx.Rollback(ctx)
+			existing, err := r.getByIdempotencyKey(ctx, userID, idempotency_key)
+			if err != nil {
+				return nil, false, err
+			}
+			return existing, false, nil
+		}
+		return nil, false, fmt.Errorf("Could not create an order: %w", err)
+	}
+
 	slices.SortFunc(items, func(a, b models.OrderItemInput) int {
 		return bytes.Compare(a.ProductID[:], b.ProductID[:])
 	})
@@ -151,33 +174,9 @@ func (r *OrderRepository) Create(ctx context.Context, userID uuid.UUID, idempote
 		total = total.Add(p.Price.Mul(decimal.NewFromInt32(int32(i.Quantity))))
 	}
 
-	orderDefaultStatus := models.OrderStatusPending
-	var o models.Order
-	const q_insert_order = `
-		INSERT INTO orders (user_id, status, total_amount, idempotency_key)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, user_id, status, total_amount, created_at, updated_at
-	`
-	err = tx.QueryRow(
-		ctx, q_insert_order, userID, orderDefaultStatus, total, idempotency_key,
-	).Scan(&o.ID, &o.UserID, &o.Status, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt)
-
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			tx.Rollback(ctx)
-			existing, err := r.getByIdempotencyKey(ctx, idempotency_key)
-			if err != nil {
-				return nil, false, err
-			}
-			return existing, false, nil
-		}
-		return nil, false, fmt.Errorf("Could not create an order: %w", err)
-	}
-
 	const q_insert_order_items = `
-		INSERT INTO order_items (order_id, product_id, quantity, price_snapshot)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO order_items (id, order_id, product_id, quantity, price_snapshot)
+		VALUES ($1, $2, $3, $4, $5)
 	`
 	const q_decrement_stock = `
 		UPDATE products
@@ -187,13 +186,47 @@ func (r *OrderRepository) Create(ctx context.Context, userID uuid.UUID, idempote
 
 	for _, it := range items {
 		p := products[it.ProductID]
-		if _, err := tx.Exec(ctx, q_insert_order_items, o.ID, it.ProductID, it.Quantity, p.Price); err != nil {
+		if _, err := tx.Exec(ctx, q_insert_order_items, uuid.New(), oid, it.ProductID, it.Quantity, p.Price); err != nil {
 			return nil, false, fmt.Errorf("Could not insert order item: %w", err)
 		}
 		if _, err := tx.Exec(ctx, q_decrement_stock, it.Quantity, it.ProductID); err != nil {
 			return nil, false, fmt.Errorf("Could not decrement stock: %w", err)
 		}
 	}
+
+	const q_update_order_total = `
+		UPDATE orders SET total_amount = $1, updated_at = NOW() WHERE id = $2
+		RETURNING id, user_id, status, total_amount, created_at, updated_at
+	`
+
+	var o models.Order
+	err = tx.QueryRow(ctx, q_update_order_total, total, oid).Scan(&o.ID, &o.UserID, &o.Status, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt)
+	if err != nil {
+		return nil, false, fmt.Errorf("Could not update order total: %w", err)
+	}
+
+	oitems := []models.OrderItem{}
+	const q_select_order_items = `
+		SELECT id, order_id, product_id, quantity, price_snapshot
+		FROM order_items
+		WHERE order_id = $1
+	`
+
+	rows, err = tx.Query(ctx, q_select_order_items, o.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("Could not select order items: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		i := models.OrderItem{}
+		if err := rows.Scan(&i.ID, &i.OrderID, &i.ProductID, &i.Quantity, &i.PriceSnapshot); err != nil {
+			return nil, false, fmt.Errorf("Could not serialize order items: %w", err)
+		}
+		oitems = append(oitems, i)
+	}
+
+	o.Items = oitems
 
 	err = tx.Commit(ctx)
 	if err != nil {
@@ -273,12 +306,12 @@ func (r *OrderRepository) Cancel(ctx context.Context, id, userID uuid.UUID) (boo
 	return true, nil
 }
 
-func (r *OrderRepository) getByIdempotencyKey(ctx context.Context, idempotency_key string) (*models.Order, error) {
+func (r *OrderRepository) getByIdempotencyKey(ctx context.Context, userID uuid.UUID, idempotency_key string) (*models.Order, error) {
 	o := &models.Order{}
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, user_id, status, total_amount, created_at, updated_at 
-		FROM orders WHERE idempotency_key = $1;
-	`, idempotency_key).Scan(&o.ID, &o.UserID, &o.Status, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt)
+		FROM orders WHERE user_id = $1 AND idempotency_key = $2;
+	`, userID, idempotency_key).Scan(&o.ID, &o.UserID, &o.Status, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
