@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -92,7 +93,12 @@ func main() {
 		}
 	}()
 
-	go jobs.StartExpiredOrdersCancelWorker(rootCtx, orderRepo, 1*time.Minute)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		jobs.StartExpiredOrdersCancelWorker(rootCtx, orderRepo, 1*time.Minute)
+	}()
 
 	<-rootCtx.Done()
 
@@ -101,4 +107,5 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("Server forced shutdown", "error", err)
 	}
+	wg.Wait()
 }

@@ -12,7 +12,7 @@ func StartExpiredOrdersCancelWorker(ctx context.Context, repo *repositories.Orde
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	slog.Info("Cancel Expired Offers task started with interval:", interval)
+	slog.Info("Cancel Expired Offers task started with interval:", "interval", interval)
 
 	for {
 		select {
@@ -22,11 +22,11 @@ func StartExpiredOrdersCancelWorker(ctx context.Context, repo *repositories.Orde
 		case <-ticker.C:
 			n, err := repo.ExpirePendingOrders(ctx)
 			if err != nil {
-				slog.Error("Expired Orders Cancellation failed: ", err)
+				slog.Error("Expired Orders Cancellation failed: ", "error", err)
 				continue
 			}
 			if n > 0 {
-				slog.Info("%w expired orders has been cancelled.", n)
+				slog.Info("Cancelled expired orders:", "count", n)
 			}
 		}
 	}

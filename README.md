@@ -253,6 +253,10 @@ O'zi e'tibor bersak cancel idempotent operatsiya, bitta cancel bo'lgan narsani y
 
 ##### Background Job: run every minute, cancel orders 'pending' and >15 minute
 
+Background Job esa statusi pending va 15 minutdan oshgan orderlarni gruppavoy select qiladi. Ularning soni juda kop bolishi ehtimolini hisobga olib (10k ta bo'lsa 10k rowni lock qilish kerak), 100 tadan batch qilib process qiladi. 
+
+`SKIP LOCKED` ishlatishimdan maqsad job har safar lock qilingan rowni bekorga kutib o'tirmay o'tib ketaverishi uchun kerak. Aytaylik agar bir user o'zi orderini cancel qilayotgan bo'lsa, u order o'sha user tomonidan lock qilingan bo'ladi, uni kutib o'tirish shart emas. O'zi cancel qilaveradi, agar fikridan qaytsa ham keyingi minutda baribir job cancel qilib yuboradi. Muhimi lockni bekorga kutib o'tirmaydi.
+
 8. Background Job query
     ```
     LOOP:
@@ -279,7 +283,6 @@ O'zi e'tibor bersak cancel idempotent operatsiya, bitta cancel bo'lgan narsani y
     - LOCK held: `orders` rows with status='pending' and created 15+ minutes ago
     - GUARANTEE: even if multiple workers run in parallel, they do not process the same order. Plus, even if 10000 expired orders, we lock 100 per iteration.
 
-Shu yerda `SKIP LOCKED` ga ham birrov to'xtalaman. LOCK qilingan rowni unlock bo'lishini kutmay, o'tib ketaverishi uchun kerak. Aytaylik agar bir user o'zi orderini cancel qilayotgan bo'lsa, u order o'sha user tomonidan lock qilingan bo'ladi, uni kutib o'tirish shart emas. O'zi cancel qilaveradi, agar fikridan qaytsa ham keyingi minutda baribir job cancel qilib yuboradi. Muhimi LOCKni bekorga kutib o'tirmaydi.
 
 DB-level locking bizni holat uchun ideal yechim. Lekin concurrency oshib borar ekan, bu locklar latency muammosi markaziga aylanadi. Hozircha bu bizni scopedan tashqarida. Lekin ulgursam yozib qo'yarman.
 

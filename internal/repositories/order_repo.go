@@ -399,14 +399,13 @@ func (r *OrderRepository) ExpirePendingOrders(ctx context.Context) (int, error) 
 					return 0, err
 				}
 			}
+		}
 
+		err = tx.Commit(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("Could not commit an order expire transaction: %w", err)
 		}
 		total_ids += len(ids)
-	}
-
-	err = tx.Commit(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("Could not commit an order expire transaction: %w", err)
 	}
 
 	return total_ids, nil
