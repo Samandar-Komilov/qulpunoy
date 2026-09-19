@@ -12,6 +12,7 @@ import (
 
 	"github.com/Samandar-Komilov/qulpunoy/internal/auth"
 	"github.com/Samandar-Komilov/qulpunoy/internal/config"
+	"github.com/Samandar-Komilov/qulpunoy/internal/jobs"
 	"github.com/Samandar-Komilov/qulpunoy/internal/repositories"
 	"github.com/Samandar-Komilov/qulpunoy/internal/routers"
 	"github.com/Samandar-Komilov/qulpunoy/internal/services"
@@ -90,6 +91,8 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	go jobs.StartExpiredOrdersCancelWorker(rootCtx, orderRepo, 1*time.Minute)
 
 	<-rootCtx.Done()
 

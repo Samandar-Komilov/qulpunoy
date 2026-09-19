@@ -322,3 +322,92 @@ func (r *OrderRepository) getByIdempotencyKey(ctx context.Context, userID uuid.U
 
 	return o, nil
 }
+
+func (r *OrderRepository) ExpirePendingOrders(ctx context.Context) (int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("Could not begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	total_ids := 0
+	for {
+		const q_select_expired_orders = `
+			SELECT id FROM orders
+			WHERE status = $1 AND created_at < NOW() - INTERVAL '15 minutes'
+			ORDER BY id
+			LIMIT 100
+			FOR UPDATE SKIP LOCKED
+		`
+		rows, err := tx.Query(ctx, q_select_expired_orders, models.OrderStatusPending)
+		if err != nil {
+			return 0, fmt.Errorf("Failed to select expired orders: %w", err)
+		}
+		var ids []uuid.UUID
+		for rows.Next() {
+			var id uuid.UUID
+			if err := rows.Scan(&id); err != nil {
+				return 0, fmt.Errorf("Failed to serialize expired orders: %w", err)
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Err(); err != nil {
+			return 0, fmt.Errorf("Failed to serialize expired orders: %w", err)
+		}
+		rows.Close()
+
+		if len(ids) == 0 {
+			break
+		}
+
+		const q_update_status = `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`
+		for _, id := range ids {
+			if _, err := tx.Exec(ctx, q_update_status, models.OrderStatusCancelled, id); err != nil {
+				return 0, fmt.Errorf("Failed to update order status: %w", err)
+			}
+
+			const q_select_order_items = `
+				SELECT product_id, quantity FROM order_items 
+				WHERE order_id = $1 ORDER BY product_id ASC
+			`
+			itemRows, err := tx.Query(ctx, q_select_order_items, id)
+			if err != nil {
+				return 0, err
+			}
+			type restored_item struct {
+				pid uuid.UUID
+				qty int
+			}
+			var items_to_restore []restored_item
+			for itemRows.Next() {
+				var t restored_item
+				if err := itemRows.Scan(&t.pid, &t.qty); err != nil {
+					return 0, err
+				}
+				items_to_restore = append(items_to_restore, restored_item{t.pid, t.qty})
+			}
+			if err := itemRows.Err(); err != nil {
+				return 0, err
+			}
+			itemRows.Close()
+
+			const q_restore_products_stock = `
+				UPDATE products SET stock_quantity = stock_quantity + $1, updated_at = NOW() WHERE id = $2
+			`
+			for _, ri := range items_to_restore {
+				if _, err := tx.Exec(ctx, q_restore_products_stock, ri.qty, ri.pid); err != nil {
+					return 0, err
+				}
+			}
+
+		}
+		total_ids += len(ids)
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("Could not commit an order expire transaction: %w", err)
+	}
+
+	return total_ids, nil
+}
