@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"log/slog"
 	"os"
 	"strconv"
@@ -21,6 +22,10 @@ type Config struct {
 	DBHost        string
 	DBPort        string
 	DBName        string
+	RedisHost     string
+	RedisPort     string
+	RedisDB       int
+	RedisPassword string
 }
 
 func Load() (*Config, error) {
@@ -28,7 +33,7 @@ func Load() (*Config, error) {
 
 	return &Config{
 		ProjectName:   getEnv("PROJECT_NAME", "qulpunoy"),
-		JWTSecret:     getEnv("JWT_SECRET", "secret"),
+		JWTSecret:     getEnv("JWT_SECRET", ""),
 		JWTAccessTTL:  getEnvMinutes("ACCESS_TOKEN_EXPIRE_MINUTES", 15),
 		JWTRefreshTTL: getEnvMinutes("REFRESH_TOKEN_EXPIRE_MINUTES", 7*24*60),
 		ServerPort:    getEnv("SERVER_PORT", "8080"),
@@ -37,12 +42,20 @@ func Load() (*Config, error) {
 		DBHost:        getEnv("DB_HOST", "localhost"),
 		DBPort:        getEnv("DB_PORT", "5432"),
 		DBName:        getEnv("DB_NAME", "postgres"),
+		RedisHost:     getEnv("REDIS_HOST", "localhost"),
+		RedisPort:     getEnv("REDIS_PORT", "6379"),
+		RedisDB:       0,
+		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 	}, nil
 }
 
 func getEnv(key, defaultVal string) string {
 	if val, ok := os.LookupEnv(key); ok && val != "" {
 		return val
+	}
+
+	if _, ok := os.LookupEnv(key); !ok && defaultVal == "" {
+		log.Fatalf("Missing env var %s", key)
 	}
 	return defaultVal
 }

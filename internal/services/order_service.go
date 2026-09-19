@@ -2,35 +2,72 @@ package services
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 
+	"github.com/Samandar-Komilov/qulpunoy/internal/cache"
 	"github.com/Samandar-Komilov/qulpunoy/internal/models"
 	"github.com/Samandar-Komilov/qulpunoy/internal/repositories"
 	"github.com/google/uuid"
 )
 
 type OrderService interface {
-	List(ctx context.Context) ([]models.Order, error)
-	GetByID(ctx context.Context, id uuid.UUID) (*models.Order, error)
+	List(ctx context.Context, userID uuid.UUID) ([]models.Order, error)
+	GetByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Order, error)
 	Create(ctx context.Context, userID uuid.UUID, idempotency_key string, items []models.OrderItemInput) (*models.Order, bool, error)
 	Cancel(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Order, error)
 }
 
 type orderService struct {
-	repo *repositories.OrderRepository
+	repo  *repositories.OrderRepository
+	cache cache.Cache
 }
 
-func NewOrderService(repo *repositories.OrderRepository) *orderService {
+func NewOrderService(repo *repositories.OrderRepository, c cache.Cache) *orderService {
 	return &orderService{
-		repo: repo,
+		repo:  repo,
+		cache: c,
 	}
 }
 
-func (s *orderService) List(ctx context.Context) ([]models.Order, error) {
-	return s.repo.List(ctx)
+func (s *orderService) List(ctx context.Context, userID uuid.UUID) ([]models.Order, error) {
+	key := cache.OrderListCacheKey(userID)
+
+	var cached []models.Order
+	if err := s.cache.GetJSON(ctx, key, &cached); err == nil {
+		return cached, nil
+	} else if !errors.Is(err, models.ErrCacheMiss) {
+		slog.Debug("Cache get failed, falling through to DB", "key", key, "error", err)
+	}
+
+	orders, err := s.repo.List(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.cache.SetJSON(ctx, key, orders, cache.OrderListCacheTTL); err != nil {
+		slog.Debug("Cache set failed", "key", key, "error", err)
+	}
+	return orders, nil
 }
 
-func (s *orderService) GetByID(ctx context.Context, id uuid.UUID) (*models.Order, error) {
-	return s.repo.GetByID(ctx, id)
+func (s *orderService) GetByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Order, error) {
+	key := cache.OrderDetailCacheKey(id, userID)
+
+	var cached models.Order
+	if err := s.cache.GetJSON(ctx, key, &cached); err == nil {
+		return &cached, nil
+	} else if !errors.Is(err, models.ErrCacheMiss) {
+		slog.Debug("Cache get failed, falling through to DB", "key", key, "error", err)
+	}
+
+	order, err := s.repo.GetByID(ctx, id, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.cache.SetJSON(ctx, key, order, cache.OrderDetailCacheTTL); err != nil {
+		slog.Debug("Cache set failed", "key", key, "error", err)
+	}
+	return order, nil
 }
 
 func (s *orderService) Create(ctx context.Context, userID uuid.UUID, idempotency_key string, items []models.OrderItemInput) (*models.Order, bool, error) {
@@ -51,7 +88,14 @@ func (s *orderService) Create(ctx context.Context, userID uuid.UUID, idempotency
 		seen[item.ProductID] = true
 	}
 
-	return s.repo.Create(ctx, userID, idempotency_key, items)
+	order, isCreated, err := s.repo.Create(ctx, userID, idempotency_key, items)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := s.cache.Del(ctx, cache.OrderListCacheKey(userID)); err != nil {
+		slog.Debug("Cache delete failed", "error", err)
+	}
+	return order, isCreated, nil
 }
 
 func (s *orderService) Cancel(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Order, error) {
@@ -62,5 +106,10 @@ func (s *orderService) Cancel(ctx context.Context, id uuid.UUID, userID uuid.UUI
 	if !isCancelled {
 		return nil, models.ErrOrderNotFound
 	}
-	return s.repo.GetByID(ctx, id)
+
+	if err := s.cache.Del(ctx, cache.OrderListCacheKey(userID), cache.OrderDetailCacheKey(id, userID)); err != nil {
+		slog.Debug("Cache delete failed", "error", err)
+	}
+
+	return s.repo.GetByID(ctx, id, userID)
 }

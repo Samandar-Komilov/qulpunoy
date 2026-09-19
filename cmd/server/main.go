@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Samandar-Komilov/qulpunoy/internal/auth"
+	"github.com/Samandar-Komilov/qulpunoy/internal/cache"
 	"github.com/Samandar-Komilov/qulpunoy/internal/config"
 	"github.com/Samandar-Komilov/qulpunoy/internal/jobs"
 	"github.com/Samandar-Komilov/qulpunoy/internal/repositories"
@@ -47,6 +48,13 @@ func main() {
 	slog.Info("Database pool initialized")
 
 	jwtManager := auth.NewManager(cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
+	redisCache, err := cache.NewRedisCache(rootCtx, cfg.RedisHost+":"+cfg.RedisPort, cfg.RedisPassword, cfg.RedisDB)
+	if err != nil {
+		slog.Error("Failed to initialize redis", "error", err)
+		os.Exit(1)
+	}
+	defer redisCache.Close()
+	slog.Info("Redis cache initialized")
 
 	userRepo := repositories.NewUserRepository(pool)
 	productRepo := repositories.NewProductRepository(pool)
@@ -55,7 +63,7 @@ func main() {
 	userService := services.NewUserService(userRepo)
 	authService := services.NewAuthService(userRepo, jwtManager)
 	productService := services.NewProductService(productRepo)
-	orderService := services.NewOrderService(orderRepo)
+	orderService := services.NewOrderService(orderRepo, redisCache)
 
 	userHandler := routers.NewUserHandler(userService)
 	authHandler := routers.NewAuthHandler(authService)
@@ -69,13 +77,13 @@ func main() {
 	r.Post("/register", userHandler.Register)
 	r.Post("/token", authHandler.Token)
 	r.Post("/refresh", authHandler.Refresh)
-	r.Get("/orders", orderHandler.List)
-	r.Get("/orders/{id}", orderHandler.Get)
 
 	// Protected APIs
 	r.Group(func(pr chi.Router) {
 		pr.Use(auth.Authenticator(jwtManager))
 		pr.Post("/products", productHandler.Create)
+		pr.Get("/orders", orderHandler.List)
+		pr.Get("/orders/{id}", orderHandler.Get)
 		pr.Post("/orders", orderHandler.Create)
 		pr.Post("/orders/{id}/cancel", orderHandler.Cancel)
 	})
@@ -97,7 +105,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		jobs.StartExpiredOrdersCancelWorker(rootCtx, orderRepo, 1*time.Minute)
+		jobs.StartExpiredOrdersCancelWorker(rootCtx, orderRepo, redisCache, 1*time.Minute)
 	}()
 
 	<-rootCtx.Done()

@@ -25,4 +25,6 @@ var (
 	ErrOrderAlreadyConfirmed    = errors.New("Order is already confirmed")
 	ErrEmptyOrderItems          = errors.New("Order must contain at least one item")
 	ErrMissingIdempotencyKey    = errors.New("Idempotency-key header is required")
+
+	ErrCacheMiss = errors.New("Cache miss: key not found")
 )

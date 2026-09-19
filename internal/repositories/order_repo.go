@@ -24,11 +24,12 @@ func NewOrderRepository(pool *pgxpool.Pool) *OrderRepository {
 	}
 }
 
-func (r *OrderRepository) List(ctx context.Context) ([]models.Order, error) {
+func (r *OrderRepository) List(ctx context.Context, userID uuid.UUID) ([]models.Order, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, user_id, status, total_amount, created_at, updated_at
-		FROM orders ORDER BY created_at DESC;
-	`)
+		FROM orders WHERE user_id = $1
+		ORDER BY created_at DESC;
+	`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("Could not read orders from DB: %w", err)
 	}
@@ -50,13 +51,13 @@ func (r *OrderRepository) List(ctx context.Context) ([]models.Order, error) {
 	return orders, nil
 }
 
-func (r *OrderRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Order, error) {
+func (r *OrderRepository) GetByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Order, error) {
 	o := &models.Order{}
 	items := []models.OrderItem{}
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, user_id, status, total_amount, created_at, updated_at 
-		FROM orders WHERE id = $1;
-	`, id).Scan(&o.ID, &o.UserID, &o.Status, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt)
+		FROM orders WHERE id = $1 AND user_id = $2;
+	`, id, userID).Scan(&o.ID, &o.UserID, &o.Status, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -323,17 +324,23 @@ func (r *OrderRepository) getByIdempotencyKey(ctx context.Context, userID uuid.U
 	return o, nil
 }
 
-func (r *OrderRepository) ExpirePendingOrders(ctx context.Context) (int, error) {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("Could not begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
+type ExpiredOrder struct {
+	ID     uuid.UUID
+	UserID uuid.UUID
+}
 
-	total_ids := 0
+func (r *OrderRepository) ExpirePendingOrders(ctx context.Context) ([]ExpiredOrder, error) {
+	expiredOrders := make([]ExpiredOrder, 0)
+
 	for {
+		tx, err := r.pool.Begin(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("Could not begin transaction: %w", err)
+		}
+		defer tx.Rollback(ctx)
+
 		const q_select_expired_orders = `
-			SELECT id FROM orders
+			SELECT id, user_id FROM orders
 			WHERE status = $1 AND created_at < NOW() - INTERVAL '15 minutes'
 			ORDER BY id
 			LIMIT 100
@@ -341,38 +348,38 @@ func (r *OrderRepository) ExpirePendingOrders(ctx context.Context) (int, error) 
 		`
 		rows, err := tx.Query(ctx, q_select_expired_orders, models.OrderStatusPending)
 		if err != nil {
-			return 0, fmt.Errorf("Failed to select expired orders: %w", err)
+			return nil, fmt.Errorf("Failed to select expired orders: %w", err)
 		}
-		var ids []uuid.UUID
+		var eos []ExpiredOrder
 		for rows.Next() {
-			var id uuid.UUID
-			if err := rows.Scan(&id); err != nil {
-				return 0, fmt.Errorf("Failed to serialize expired orders: %w", err)
+			var eo ExpiredOrder
+			if err := rows.Scan(&eo.ID, &eo.UserID); err != nil {
+				return nil, fmt.Errorf("Failed to serialize expired orders: %w", err)
 			}
-			ids = append(ids, id)
+			eos = append(eos, eo)
 		}
 		if err := rows.Err(); err != nil {
-			return 0, fmt.Errorf("Failed to serialize expired orders: %w", err)
+			return nil, fmt.Errorf("Failed to serialize expired orders: %w", err)
 		}
 		rows.Close()
 
-		if len(ids) == 0 {
+		if len(eos) == 0 {
 			break
 		}
 
 		const q_update_status = `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`
-		for _, id := range ids {
-			if _, err := tx.Exec(ctx, q_update_status, models.OrderStatusCancelled, id); err != nil {
-				return 0, fmt.Errorf("Failed to update order status: %w", err)
+		for _, eo := range eos {
+			if _, err := tx.Exec(ctx, q_update_status, models.OrderStatusCancelled, eo.ID); err != nil {
+				return nil, fmt.Errorf("Failed to update order status: %w", err)
 			}
 
 			const q_select_order_items = `
-				SELECT product_id, quantity FROM order_items 
+				SELECT product_id, quantity FROM order_items
 				WHERE order_id = $1 ORDER BY product_id ASC
 			`
-			itemRows, err := tx.Query(ctx, q_select_order_items, id)
+			itemRows, err := tx.Query(ctx, q_select_order_items, eo.ID)
 			if err != nil {
-				return 0, err
+				return nil, err
 			}
 			type restored_item struct {
 				pid uuid.UUID
@@ -382,12 +389,12 @@ func (r *OrderRepository) ExpirePendingOrders(ctx context.Context) (int, error) 
 			for itemRows.Next() {
 				var t restored_item
 				if err := itemRows.Scan(&t.pid, &t.qty); err != nil {
-					return 0, err
+					return nil, err
 				}
 				items_to_restore = append(items_to_restore, restored_item{t.pid, t.qty})
 			}
 			if err := itemRows.Err(); err != nil {
-				return 0, err
+				return nil, err
 			}
 			itemRows.Close()
 
@@ -396,17 +403,17 @@ func (r *OrderRepository) ExpirePendingOrders(ctx context.Context) (int, error) 
 			`
 			for _, ri := range items_to_restore {
 				if _, err := tx.Exec(ctx, q_restore_products_stock, ri.qty, ri.pid); err != nil {
-					return 0, err
+					return nil, err
 				}
 			}
 		}
 
-		err = tx.Commit(ctx)
-		if err != nil {
-			return 0, fmt.Errorf("Could not commit an order expire transaction: %w", err)
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("Could not commit an order cancel transaction: %w", err)
 		}
-		total_ids += len(ids)
+
+		expiredOrders = append(expiredOrders, eos...)
 	}
 
-	return total_ids, nil
+	return expiredOrders, nil
 }

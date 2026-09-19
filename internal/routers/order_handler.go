@@ -25,7 +25,13 @@ func NewOrderHandler(service services.OrderService) *OrderHandler {
 }
 
 func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
-	orders, err := h.service.List(r.Context())
+	userID, ok := auth.GetCurrentUser(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	orders, err := h.service.List(r.Context(), userID)
 	if err != nil {
 		slog.Error("Failed to list orders", "error", err)
 		writeError(w, http.StatusInternalServerError, "Internal server error")
@@ -47,6 +53,12 @@ func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *OrderHandler) Get(w http.ResponseWriter, r *http.Request) {
+	userID, ok := auth.GetCurrentUser(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -54,7 +66,7 @@ func (h *OrderHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	order, err := h.service.GetByID(r.Context(), id)
+	order, err := h.service.GetByID(r.Context(), id, userID)
 	if err != nil {
 		switch {
 		case errors.Is(err, models.ErrOrderNotFound):
