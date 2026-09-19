@@ -10,7 +10,7 @@ DB_SSLMODE ?= disable
 DB_URL ?= postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSLMODE)
 MIGRATIONS_DIR ?= migrations
 
-.PHONY: run build tidy migrate-up migrate-down migrate-status
+.PHONY: run build tidy migrate-up migrate-down migrate-status compose-up compose-down
 
 run:
 	go run ./cmd/server
@@ -29,3 +29,9 @@ migrate-down:
 
 migrate-status:
 	goose -dir $(MIGRATIONS_DIR) postgres "$(DB_URL)" status
+
+compose-up:
+	docker compose up -d --build
+
+compose-down:
+	docker compose down -v
