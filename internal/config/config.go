@@ -28,8 +28,8 @@ type Config struct {
 	RedisPassword string
 }
 
-func Load() (*Config, error) {
-	_ = godotenv.Load()
+func Load(filenames ...string) (*Config, error) {
+	_ = godotenv.Load(filenames...)
 
 	return &Config{
 		ProjectName:   getEnv("PROJECT_NAME", "qulpunoy"),

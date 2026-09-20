@@ -10,10 +10,18 @@ DB_SSLMODE ?= disable
 DB_URL ?= postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSLMODE)
 MIGRATIONS_DIR ?= migrations
 
-.PHONY: run build tidy migrate-up migrate-down migrate-status compose-up compose-down
+.PHONY: run build tidy test test-down migrate-up migrate-down migrate-status compose-up compose-down
 
 run:
 	go run ./cmd/server
+
+test:
+	docker compose up -d --wait db redis
+	DB_HOST=localhost DB_PORT=5436 REDIS_HOST=localhost REDIS_PORT=6381 \
+		go test ./test/integration -count=1 -v
+
+test-down:
+	docker compose stop db redis
 
 build:
 	go build -o bin/qulpunoy ./cmd/server

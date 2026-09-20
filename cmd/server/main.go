@@ -18,8 +18,6 @@ import (
 	"github.com/Samandar-Komilov/qulpunoy/internal/repositories"
 	"github.com/Samandar-Komilov/qulpunoy/internal/routers"
 	"github.com/Samandar-Komilov/qulpunoy/internal/services"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 )
 
 func main() {
@@ -70,22 +68,12 @@ func main() {
 	productHandler := routers.NewProductHandler(productService)
 	orderHandler := routers.NewOrderHandler(orderService)
 
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-
-	// Public APIs
-	r.Post("/register", userHandler.Register)
-	r.Post("/token", authHandler.Token)
-	r.Post("/refresh", authHandler.Refresh)
-
-	// Protected APIs
-	r.Group(func(pr chi.Router) {
-		pr.Use(auth.Authenticator(jwtManager))
-		pr.Post("/products", productHandler.Create)
-		pr.Get("/orders", orderHandler.List)
-		pr.Get("/orders/{id}", orderHandler.Get)
-		pr.Post("/orders", orderHandler.Create)
-		pr.Post("/orders/{id}/cancel", orderHandler.Cancel)
+	r := routers.NewRouter(routers.Deps{
+		JWT:            jwtManager,
+		UserHandler:    userHandler,
+		AuthHandler:    authHandler,
+		ProductHandler: productHandler,
+		OrderHandler:   orderHandler,
 	})
 
 	server := &http.Server{
