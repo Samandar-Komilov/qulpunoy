@@ -28,6 +28,7 @@ func NewRouter(d Deps) http.Handler {
 		pr.Get("/orders", d.OrderHandler.List)
 		pr.Get("/orders/{id}", d.OrderHandler.Get)
 		pr.Post("/orders", d.OrderHandler.Create)
+		pr.Post("/orders/{id}/confirm", d.OrderHandler.Confirm)
 		pr.Post("/orders/{id}/cancel", d.OrderHandler.Cancel)
 	})
 	return r

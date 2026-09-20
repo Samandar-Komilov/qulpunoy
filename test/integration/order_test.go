@@ -205,6 +205,69 @@ func (s *APISuite) TestOrderList() {
 	})
 }
 
+func (s *APISuite) TestOrderConfirm() {
+	token := s.loginSomeUser()
+	productID := s.seedProduct(10, "8.00")
+	_, body := s.createOrder(token, gofakeit.UUID(), map[string]any{
+		"product_id": productID.String(),
+		"quantity":   3,
+	})
+	orderID := s.orderIDFromBody(body)
+	s.Require().Equal(7, s.productStock(productID))
+
+	s.Run("confirm pending order returns 200 and keeps stock", func() {
+		resp, body := s.do(http.MethodPost, "/orders/"+orderID.String()+"/confirm", token, nil)
+		s.Require().Equal(http.StatusOK, resp.StatusCode)
+
+		var res struct {
+			Status string `json:"status"`
+		}
+		s.Require().NoError(json.Unmarshal(body, &res))
+		s.Equal("confirmed", res.Status)
+		s.Equal(7, s.productStock(productID))
+	})
+
+	s.Run("confirm already confirmed order returns 409", func() {
+		resp, _ := s.do(http.MethodPost, "/orders/"+orderID.String()+"/confirm", token, nil)
+		s.Equal(http.StatusConflict, resp.StatusCode)
+	})
+
+	s.Run("cancel confirmed order returns 409", func() {
+		resp, _ := s.do(http.MethodPost, "/orders/"+orderID.String()+"/cancel", token, nil)
+		s.Equal(http.StatusConflict, resp.StatusCode)
+	})
+
+	s.Run("confirmed order is not auto cancelled by job", func() {
+		s.expireOrderIntentionally(orderID, "16 minutes")
+		expired, err := s.orderRepo.ExpirePendingOrders(context.Background())
+		s.Require().NoError(err)
+		s.Len(expired, 0)
+		s.Equal("confirmed", s.orderStatus(orderID))
+	})
+
+	s.Run("confirm unknown order returns 404", func() {
+		resp, _ := s.do(http.MethodPost, "/orders/"+uuid.New().String()+"/confirm", token, nil)
+		s.Equal(http.StatusNotFound, resp.StatusCode)
+	})
+
+	s.Run("confirm another user's order returns 404", func() {
+		token2 := s.loginSomeUser()
+		_, body := s.createOrder(token2, gofakeit.UUID(), map[string]any{
+			"product_id": productID.String(),
+			"quantity":   1,
+		})
+		otherOrderID := s.orderIDFromBody(body)
+
+		resp, _ := s.do(http.MethodPost, "/orders/"+otherOrderID.String()+"/confirm", token, nil)
+		s.Equal(http.StatusNotFound, resp.StatusCode)
+	})
+
+	s.Run("confirm without token returns 401", func() {
+		resp, _ := s.do(http.MethodPost, "/orders/"+orderID.String()+"/confirm", "", nil)
+		s.Equal(http.StatusUnauthorized, resp.StatusCode)
+	})
+}
+
 func (s *APISuite) TestOrderCancel() {
 	token := s.loginSomeUser()
 	productID := s.seedProduct(10, "8.00")

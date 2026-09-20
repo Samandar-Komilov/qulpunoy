@@ -15,6 +15,7 @@ type OrderService interface {
 	List(ctx context.Context, userID uuid.UUID) ([]models.Order, error)
 	GetByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Order, error)
 	Create(ctx context.Context, userID uuid.UUID, idempotency_key string, items []models.OrderItemInput) (*models.Order, bool, error)
+	Confirm(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Order, error)
 	Cancel(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Order, error)
 }
 
@@ -98,6 +99,22 @@ func (s *orderService) Create(ctx context.Context, userID uuid.UUID, idempotency
 	return order, isCreated, nil
 }
 
+func (s *orderService) Confirm(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Order, error) {
+	isConfirmed, err := s.repo.Confirm(ctx, id, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isConfirmed {
+		return nil, models.ErrOrderAlreadyConfirmed
+	}
+
+	if err := s.cache.Del(ctx, cache.OrderListCacheKey(userID), cache.OrderDetailCacheKey(id, userID)); err != nil {
+		slog.Debug("Cache delete failed", "error", err)
+	}
+
+	return s.GetByID(ctx, id, userID)
+}
+
 func (s *orderService) Cancel(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*models.Order, error) {
 	isCancelled, err := s.repo.Cancel(ctx, id, userID)
 	if err != nil {
@@ -111,5 +128,5 @@ func (s *orderService) Cancel(ctx context.Context, id uuid.UUID, userID uuid.UUI
 		slog.Debug("Cache delete failed", "error", err)
 	}
 
-	return s.repo.GetByID(ctx, id, userID)
+	return s.GetByID(ctx, id, userID)
 }

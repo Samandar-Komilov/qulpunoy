@@ -237,7 +237,46 @@ func (r *OrderRepository) Create(ctx context.Context, userID uuid.UUID, idempote
 	return &o, true, nil
 }
 
-func (r *OrderRepository) Cancel(ctx context.Context, id, userID uuid.UUID) (bool, error) {
+func (r *OrderRepository) Confirm(ctx context.Context, id uuid.UUID, userID uuid.UUID) (bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("Could not begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	const q_lock_check = `
+		SELECT status FROM orders
+		WHERE id = $1 AND user_id = $2
+		FOR UPDATE
+	`
+
+	var status string
+	err = tx.QueryRow(ctx, q_lock_check, id, userID).Scan(
+		&status,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, models.ErrOrderNotFound
+		}
+		return false, fmt.Errorf("Could not check order status: %w", err)
+	}
+	if status != models.OrderStatusPending {
+		return false, models.ErrInvalidOrderStatus
+	}
+
+	if _, err := tx.Exec(ctx, `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`, models.OrderStatusConfirmed, id); err != nil {
+		return false, fmt.Errorf("Could not confirm order: %w", err)
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return false, fmt.Errorf("Could not commit an order cancel transaction: %w", err)
+	}
+
+	return true, nil
+}
+
+func (r *OrderRepository) Cancel(ctx context.Context, id uuid.UUID, userID uuid.UUID) (bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("Could not begin transaction: %w", err)

@@ -61,7 +61,7 @@ Bu system-level project bo'lgani sabab, uni qurishda dastlab aniq reja tuzib, ke
 2. DB structure & ER diagram
 3. Transaction Boundaries and Concurrency
 4. Caching strategy
-6. Testing: Integration and Load tests
+5. Testing: Integration and Load tests
 
 Implementatsiya parallel davom etadi. 
 Faqatgina testing qismiga AI ishlatishim mumkin, lekin harakat qilaman o'zim yozishga.
@@ -253,7 +253,7 @@ O'zi e'tibor bersak cancel idempotent operatsiya, bitta cancel bo'lgan narsani y
 7. `POST /orders/{id}/cancel`
     ```
     BEGIN
-        SELECT status FROM orders WHERE id = $1 FOR UPDATE
+        SELECT status FROM orders WHERE id = $1 AND user_id = $ FOR UPDATE
         IF NOT FOUND: ROLLBACK (404)
         IF status != 'pending': ROLLBACK (409)
 
@@ -279,7 +279,22 @@ Background Job esa statusi pending va 15 minutdan oshgan orderlarni gruppavoy se
 
 `SKIP LOCKED` ishlatishimdan maqsad job har safar lock qilingan rowni bekorga kutib o'tirmay o'tib ketaverishi uchun kerak. Aytaylik agar bir user o'zi orderini cancel qilayotgan bo'lsa, u order o'sha user tomonidan lock qilingan bo'ladi, uni kutib o'tirish shart emas. O'zi cancel qilaveradi, agar fikridan qaytsa ham keyingi minutda baribir job cancel qilib yuboradi. Muhimi lockni bekorga kutib o'tirmaydi.
 
-8. Background Job query
+##### Order Confirm
+
+Bu yerda ham `SELECT FOR UPDATE` orqali rowni lock qilib olib, keyin status update qilaman.
+
+8. `POST /orders/{id}/confirm`
+    ```
+    BEGIN
+        SELECT status FROM orders WHERE id = $1 AND user_id = $2 FOR UPDATE
+        IF NOT FOUND: ROLLBACK (404)
+        IF status != 'pending': ROLLBACK (409)
+
+        UPDATE orders SET status = 'confirmed' WHERE id = $1
+    COMMIT
+    ```
+
+9. Background Job query
     ```
     LOOP:
         BEGIN
