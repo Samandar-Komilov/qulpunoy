@@ -1,3 +1,5 @@
+name: qulpunoy
+
 services:
   backend:
     build:
@@ -7,13 +9,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    environment:
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_NAME: postgres
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      SERVER_PORT: 8080
     depends_on:
       db:
         condition: service_healthy

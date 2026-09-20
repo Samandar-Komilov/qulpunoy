@@ -16,12 +16,12 @@ run:
 	go run ./cmd/server
 
 test:
-	docker compose up -d --wait db redis
+	docker compose -f docker-compose.test.yml up -d --wait db redis
 	DB_HOST=localhost DB_PORT=5436 REDIS_HOST=localhost REDIS_PORT=6381 \
 		go test ./test/integration -count=1 -v
 
 test-concurrency:
-	docker compose up -d --wait db redis
+	docker compose -f docker-compose.test.yml up -d --wait db redis
 	DB_HOST=localhost DB_PORT=5436 REDIS_HOST=localhost REDIS_PORT=6381 \
 		go test ./test/integration -count=1 -v -race -run 'TestOrderAPI/TestConcurrent'
 
