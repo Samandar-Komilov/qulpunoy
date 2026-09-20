@@ -1,5 +1,27 @@
 # Qulpunoy - Order & Inventory Management under high concurrency
 
+## How to Run and Test the Project
+
+Reponi clone qilganizdan keyin 2 tagina ish qilish kerak:
+```
+cp .env.example .env
+make test
+```
+Agar concurrency testlarni o'zini run qilmoqchi bo'lsangiz:
+```
+make test-concurrency
+```
+Agar testlarni emas proyektni o'zini (docker orqali) run qilmoqchi bo'lsangiz:
+```
+make compose-up
+```
+Localda run qilish uchun:
+```
+make run
+```
+
+---
+
 ## Task Requirements (MUST)
 
 #### General
@@ -283,11 +305,34 @@ Background Job esa statusi pending va 15 minutdan oshgan orderlarni gruppavoy se
     - LOCK held: `orders` rows with status='pending' and created 15+ minutes ago
     - GUARANTEE: even if multiple workers run in parallel, they do not process the same order. Plus, even if 10000 expired orders, we lock 100 per iteration.
 
+Umuman olganda bu background job uchun yagona yechim emas. Ya'ni, o'zim goroutine+ticker qilish o'rniga tayyor yechimlardan ham foydalanishim mumkin:
+- asynq. Redisga asoslangan distributed task queue. 
+- riverqueue. Postgresga asoslangan distributed task queue.
+Production environmentlarda qo'lda goroutine-ticker qilishdan ko'ra task queuega ishonch bildirish yaxshiroq. Tasklarni monitor qila olamiz, persistency bo'ladi, riverqueue da ayniqsa dynamic workflowlar ham qilsa bo'lar ekan. Lekin bizda hozir test project va bitta ishni bajarishi kerak, qo'lda goroutine+ticker yetarli.
 
-DB-level locking bizni holat uchun ideal yechim. Lekin concurrency oshib borar ekan, bu locklar latency muammosi markaziga aylanadi. Hozircha bu bizni scopedan tashqarida. Lekin ulgursam yozib qo'yarman.
+DB-level locking bizni holat uchun ideal yechim. Lekin concurrency oshib borar ekan (pryam oshib ketsa, 100k+), bu locklar latency muammosi markaziga aylanadi, chunki 100 mingta concurrent request har biri lockni kutib o'tirishi kerak, sinxronizatsiya va bunga ketgan context switch. Hozircha bu bizni scopedan tashqarida.
 
 ### S4: Caching
 
+Cache strategy sifatida Cache-aside yetarli deb qaror qildim. Sababi bizda read-heavy faqat order-list va order-detail bor, avval DB ga borib result obkelib cachega TTL bilan saqlab qo'y, keyin TTL tugagunicha yoki birorta write request invalidate qilguncha cachedan ber, eng standard usul. Write APIlarni keshlashdan ma'no yo'q. Order Listni ham boshida authsiz qilib qo'ygandim, luboy user boshqalarnikini kora olsin deb. Lekin cache tomondan bu yomon, luboy user qilgan write (order create/cancel) butun list cacheni invalidate qiladi. Order create/cancel ham ko'p bo'lishini hisobga olsak, bekorga redisga borib kelgani qoladi. Shu sabab keyin auth qoshdim.
 
-### S5: Testing: Integration and Load
+### S5: Environment Setup and Testing
 
+#### Environment
+
+Requirement bo'yicha docker configlar qildim:
+- [Dockerfile](./Dockerfile) - multi-stage build. Image size kichik bo'lishi uchun butun buildni vaqtincha imageda qilib turaman va keyin hosil bo'lgan executableni yakuniy imagega copy qilib prosta run qilib qoyaman. 
+- [docker-compose.yml](./docker-compose.yml) - appni full dockerda run qilib qo'lda sinab korish uchun.
+- [docker-compose.test.yml](./docker-compose.test.yml) - faqat integration va concurrency testlarni tezgina run qilib natijani korib olish uchun.
+
+#### Testing: Integration and Concurrency Tests
+
+Integration testlarda hamma invariantlar tekshirib verify qilib chiqildi. Bu uchun `testify` va dbga random data tiqish uchun `gofakeit`, Pythonda `Faker" bor edi shunga alternativ qidirib shuni topdim. 
+
+Concurrency test 2 xil LOW va HIGH scenariolar bilan testladim, 100 va 1000 concurrency uchun. 
+
+Testing jarayonida ham kodni o'zidan ham bir nechta joylari o'zgardi, ya'ni testlagandan keyin ba'zi joylar yanada yaxshilandi. 
+
+### Conclusion
+
+Umuman olganda, proyektni qurishda maksimal Go idiomatic yozishga harakat qildim. Python background bo'lgani uchun biroz lang friction ham bo'ldi, ba'zi joylarda pythonic yozib qoygan bolsam sorry :))
