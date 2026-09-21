@@ -194,13 +194,35 @@ Lekin bu yerda bir nechta `NO` keyslari borki, biz keyingi yechimga o'tishga maj
 
 Keyin o'tirib o'ylaymizda, zarilmi menga instance bilan DB o'rtasiga redis tiqib, DB ni o'zida lock bo'lsa!
 
-#### Handling Concurrency: DB-level Locks
+#### Handling Concurrency: DB-level Locks and Isolation
 
 Jadvalning shared rowiga access qilayotganda DBga aytsak bo'ladi: "Shu rowni men uchun lock qilib tur, ishimni qilib olay". DB lock qilib beradi. Lock tranzaksiya ichida, demak nimadir neto ketsa hammasi ROLLBACK (unlock ham) bo'ladi. 
 
-Ajoyib, lekin bir muammo bor. Tranzaksiyalar istagan ketma-ketlikda lock qilishni so'rashi mumkin. Aytaylik TX1 tranzaksiya P1 va P2 productlarni lock qilmoqchi. TX2 esa P2 va P1 ni (user tanlagan ketma-ketlikda). U holda TX1 P1 ni lock qilgan momentda TX2 P2 ni lock qiladi. Keyingi momentda esa TX1 P2 ni lock qilaman desa band, kutadi. TX2 P1 ni lock qilaman desa band, uyam kutadi. Deadlock.
+Ajoyib, lekin bir muammo bor. Tranzaksiyalar istagan ketma-ketlikda lock qilishni so'rashi mumkin. Aytaylik TX1 tranzaksiya P1 va P2 productlarni lock qilmoqchi. TX2 esa P2 va P1 ni (user tanlagan ketma-ketlikda). U holda TX1 P1 ni lock qilgan momentda TX2 P2 ni lock qiladi. Keyingi momentda esa TX1 P2 ni lock qilaman desa band, kutadi. TX2 P1 ni lock qilaman desa band, uyam kutadi. Deadlock. Buni oldini olish uchun user tanlagan product ID larni sort qilish yetarli. Shunda circular dependency bo'lmasligi kafolatlanadi.
 
-Buni oldini olish uchun user tanlagan product ID larni sort qilish yetarli. Shunda circular dependency bo'lmasligi kafolatlanadi.
+Okay, lock ishlatib concurrencyni handle qildim. Lekin DB lock degani o'zi nima? Avvalo, nimani kimdan himoya qilyapmiz? Shared datani concurrent transactiondan. Transaction desa ACID miyaga kelishi aniq. I=Isolation, bir tranzaksiya boshqasidan isolated bo'lishi kerak degan shartga amal qilyapmiz. Lekin qanchalik isolated?
+
+##### Serializability: Highest Isolation Level
+
+DDIA aytadiki, eng yuqori isolated darajasi *Serializability*, ya'ni har bir tranzaksiya "butun DBda faqat men borman" deb o'ylashi, tranzaksiyalar concurrent yurgan bo'lishi mumkin esa-da natija xuddi ketma-ket yurgandek bo'lishi. Buni 3 xil turi bor:
+1. Rostakamiga sinxronizatsiya qilish. 1 ta CPU 1 ta threadda tranzaksiyalar ketma-ket yuradi, lekin bitta tranzaksiya butun DB ni bloklaydi. 10 mingta tranzaksiya qanchalik kutishini tasavvur qilavering;
+2. Ikki taraflama lock. Readers block writers, writers block readers. Bu degani, hatto read uchun ham datani lock qilish kerak. Read odatda writedan ancha ko'p bo'lishi sababli read qilganda shared lock, write qilganda exclusive lock qilish mumkin. Ya'ni read qilganda bir nechta tranzaksiya bitta lockni ishlatib o'qiy oladi, bu birmuncha kutishlarni kamaytiradi. Lekin baribir writer o'sha shared lockni kutib turishi latency uchun unchalik yaxshi emas.
+3. Serializable Snapshot isolation (SSI). Har bir tranzaksiya o'sha momentdagi snapshotga ega bo'lishi va o'shani read/write qilishi. DB esa track qilib boradi kim nimani o'qidi kim nimani yozdi. Commit paytida nimadir neto bo'lsa o'sha tranzaksiya abort bo'ladi.
+
+Yaxshi, lekin biz total isolation qo'llashimiz shart emas, ham ularning yaxshigina performance costlari bor. Biz faqat shu product stocklarni yo'qolib qolishdan asrashimiz kerak. Buni uchun esa weak isolation levellar yetarli yechim beroladi.
+
+##### Weak Isolation Levels
+
+1. Read Uncommitted. Transaction hali boshqa txnlar commit qilmagan changelarni ham o'qiyveradi/yozaveradi, dirty read/write. Isolation yo'q hisobi.
+2. Read Committed. Transaction faqatgina commit qilingan changelarni o'qiy oladi, faqat commit qilingan datani write qila oladi.
+3. Repeatable Read. Bir tranzaksiya ichida o'qilgan data o'sha tranzaksiya davomida necha marta o'qilsa ham o'z holida qolishini kafolatlaydi. 
+4. Snapshot Isolation (SI). Har bir tranzaksiyada ishga tushgan vaqtidagi data snapshoti bo'ladi, o'sha asosida read/write qiladi. Bu SSI emas, DB track qilmaydi. Natijada write-skew ehtimoli ochiq qoladi.
+
+PostgreSQL default holatda READ COMMITTED levelida ishlaydi. Lekin bu levelda bizga lost update xavf soladi, sababi bizni stock increment/decrement logikamizda avval stockni nechiligini o'qib olamiz va keyin update qilamiz. Bir tranzaksiya ichida okay, lekin o'sha SELECT va UPDATE orasida boshqa tranzaksiya ham stockni o'sha son bilan o'qishi mumkin: T1 da ham T2 da ham stock=10. Keyin T1 ham T2 ham stock=9 qilib update qiladi, lost update. 
+
+No baribir men shu levelda qoldim, SERIALIZABLEga o'tmadim. Men uchun race conditionni oldini olish qanchalik muhim bo'lsa, latencyni past ushlash ham shunchalik muhim. Ham bizni muammoni READ COMMITTEDni o'zida hal qilish mumkin. SELECT paytida o'sha rowni lock qilsam boshqa tranzaksiya oradagi vaqtdan "foydalanib" qololmaydi: `SELECT FOR UPDATE`. 
+
+DB-level locking bizni holat uchun ideal yechim. Lekin concurrency oshib borar ekan (pryam oshib ketsa, 100k+), bu locklar latency muammosi markaziga aylanadi, chunki 100 mingta concurrent request har biri lockni kutib o'tirishi kerak, sinxronizatsiya va bunga ketgan context switch. Hozircha bu bizni scopedan tashqarida.
 
 ##### Order Create
 
@@ -273,12 +295,6 @@ O'zi e'tibor bersak cancel idempotent operatsiya, bitta cancel bo'lgan narsani y
     - LOCK held: that specific order row
     - GUARANTEE: even if user and background job both attempt to cancel simultaneously, the stock is returned only once
 
-##### Background Job: run every minute, cancel orders 'pending' and >15 minute
-
-Background Job esa statusi pending va 15 minutdan oshgan orderlarni gruppavoy select qiladi. Ularning soni juda kop bolishi ehtimolini hisobga olib (10k ta bo'lsa 10k rowni lock qilish kerak), 100 tadan batch qilib process qiladi. 
-
-`SKIP LOCKED` ishlatishimdan maqsad job har safar lock qilingan rowni bekorga kutib o'tirmay o'tib ketaverishi uchun kerak. Aytaylik agar bir user o'zi orderini cancel qilayotgan bo'lsa, u order o'sha user tomonidan lock qilingan bo'ladi, uni kutib o'tirish shart emas. O'zi cancel qilaveradi, agar fikridan qaytsa ham keyingi minutda baribir job cancel qilib yuboradi. Muhimi lockni bekorga kutib o'tirmaydi.
-
 ##### Order Confirm
 
 Bu yerda ham `SELECT FOR UPDATE` orqali rowni lock qilib olib, keyin status update qilaman.
@@ -293,6 +309,12 @@ Bu yerda ham `SELECT FOR UPDATE` orqali rowni lock qilib olib, keyin status upda
         UPDATE orders SET status = 'confirmed' WHERE id = $1
     COMMIT
     ```
+
+##### Background Job: run every minute, cancel orders 'pending' and >15 minute
+
+Background Job esa statusi pending va 15 minutdan oshgan orderlarni gruppavoy select qiladi. Ularning soni juda kop bolishi ehtimolini hisobga olib (10k ta bo'lsa 10k rowni lock qilish kerak), 100 tadan batch qilib process qiladi. 
+
+`SKIP LOCKED` ishlatishimdan maqsad job har safar lock qilingan rowni bekorga kutib o'tirmay o'tib ketaverishi uchun kerak. Aytaylik agar bir user o'zi orderini cancel qilayotgan bo'lsa, u order o'sha user tomonidan lock qilingan bo'ladi, uni kutib o'tirish shart emas. O'zi cancel qilaveradi, agar fikridan qaytsa ham keyingi minutda baribir job cancel qilib yuboradi. Muhimi lockni bekorga kutib o'tirmaydi.
 
 9. Background Job query
     ```
@@ -324,8 +346,6 @@ Umuman olganda bu background job uchun yagona yechim emas. Ya'ni, o'zim goroutin
 - asynq. Redisga asoslangan distributed task queue. 
 - riverqueue. Postgresga asoslangan distributed task queue.
 Production environmentlarda qo'lda goroutine-ticker qilishdan ko'ra task queuega ishonch bildirish yaxshiroq. Tasklarni monitor qila olamiz, persistency bo'ladi, riverqueue da ayniqsa dynamic workflowlar ham qilsa bo'lar ekan. Lekin bizda hozir test project va bitta ishni bajarishi kerak, qo'lda goroutine+ticker yetarli.
-
-DB-level locking bizni holat uchun ideal yechim. Lekin concurrency oshib borar ekan (pryam oshib ketsa, 100k+), bu locklar latency muammosi markaziga aylanadi, chunki 100 mingta concurrent request har biri lockni kutib o'tirishi kerak, sinxronizatsiya va bunga ketgan context switch. Hozircha bu bizni scopedan tashqarida.
 
 ### S4: Caching
 
